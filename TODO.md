@@ -18,3 +18,7 @@
 - [x] Deterministic further-reading via Wikipedia morelike + See also (LLM fallback)
 - [x] Per-IP rate limiting on LLM endpoints (20/hr public; LAN/VPN/bypass-key exempt)
 - [x] Narrator styles (Normal/Bedtime/Kids/Dramatic) with per-style cached variants
+- [x] OG/social preview tags injected per share URL
+- [x] "Surprise me" random story + "Featured" daily story (warm-cached on boot)
+- [x] Listen button (browser TTS), reading time, scroll progress bar
+- [x] "Recently told" section on landing

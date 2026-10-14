@@ -74,6 +74,9 @@ class _NarratePageState extends State<NarratePage> {
   bool _relatedLoading = false;
   String _bypassKey = '';
   String _style = 'standard';
+  bool _speaking = false;
+  String? _featuredTitle;
+  List<dynamic> _recent = [];
 
   @override
   void initState() {
@@ -86,7 +89,34 @@ class _NarratePageState extends State<NarratePage> {
     final segs = Uri.base.pathSegments;
     if (segs.length >= 2 && segs[0] == 's' && segs[1].isNotEmpty) {
       _loadSharedStory(segs[1]);
+    } else {
+      _loadLandingData();
     }
+  }
+
+  Future<void> _loadLandingData() async {
+    final baseUrl = _backendController.text.trim();
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrl/api/featured'))
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) {
+        setState(
+          () =>
+              _featuredTitle = jsonDecode(res.body)['title'] as String?,
+        );
+      }
+    } catch (_) {}
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrl/api/stories'))
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) {
+        setState(
+          () => _recent = (jsonDecode(res.body)['stories'] as List?) ?? [],
+        );
+      }
+    } catch (_) {}
   }
 
   @override
@@ -108,8 +138,11 @@ class _NarratePageState extends State<NarratePage> {
       _cached = false;
       _related = [];
       _relatedLoading = false;
+      _speaking = false;
     });
+    stopSpeech();
     replaceBrowserPath('/');
+    _loadLandingData();
   }
 
   Future<void> _loadSharedStory(String slug) async {
@@ -146,10 +179,16 @@ class _NarratePageState extends State<NarratePage> {
     }
   }
 
-  Future<void> _generate({bool regen = false}) async {
-    final query = _queryController.text.trim();
-    if (query.isEmpty) return;
+  Future<void> _generate({bool regen = false}) =>
+      _requestStory(regen: regen);
 
+  Future<void> _surprise() => _requestStory(random: true);
+
+  Future<void> _requestStory({bool random = false, bool regen = false}) async {
+    final query = _queryController.text.trim();
+    if (!random && query.isEmpty) return;
+
+    stopSpeech();
     setState(() {
       _readerMode = true;
       _loading = true;
@@ -160,6 +199,7 @@ class _NarratePageState extends State<NarratePage> {
       _cached = false;
       _related = [];
       _relatedLoading = false;
+      _speaking = false;
     });
 
     final baseUrl = _backendController.text.trim();
@@ -173,6 +213,7 @@ class _NarratePageState extends State<NarratePage> {
           'query': query,
           'regen': regen,
           'style': _style,
+          'random': random,
         });
 
       final response = await http.Client().send(request);
@@ -189,6 +230,7 @@ class _NarratePageState extends State<NarratePage> {
 
       final storySlug = response.headers['x-story-id'];
       final storyCached = response.headers['x-story-cached'] == '1';
+      final storyTitle = response.headers['x-story-title'];
 
       await for (final chunk in response.stream.transform(utf8.decoder)) {
         setState(() {
@@ -198,8 +240,12 @@ class _NarratePageState extends State<NarratePage> {
         _scrollToBottom();
       }
 
+      final canonical = storyTitle == null
+          ? query
+          : Uri.decodeComponent(storyTitle);
       setState(() {
-        _storyTitle = query;
+        _storyTitle = canonical;
+        if (canonical.isNotEmpty) _queryController.text = canonical;
         _cached = storyCached;
         _shareUrl = storySlug == null
             ? ''
@@ -264,6 +310,18 @@ class _NarratePageState extends State<NarratePage> {
     });
   }
 
+  void _toggleSpeech() {
+    if (_speaking) {
+      stopSpeech();
+      setState(() => _speaking = false);
+    } else if (_narrative.isNotEmpty) {
+      setState(() => _speaking = true);
+      speakText(_narrative, () {
+        if (mounted) setState(() => _speaking = false);
+      });
+    }
+  }
+
   Future<void> _copyShareLink() async {
     await Clipboard.setData(ClipboardData(text: _shareUrl));
     if (!mounted) return;
@@ -277,6 +335,16 @@ class _NarratePageState extends State<NarratePage> {
 
   void _setExample(String q) {
     _queryController.text = q;
+  }
+
+  void _openStory(String slug) {
+    _loadSharedStory(slug);
+    replaceBrowserPath('/s/$slug');
+  }
+
+  int _readingMinutes() {
+    final words = _narrative.split(RegExp(r'\s+')).length;
+    return (words / 200).ceil().clamp(1, 999);
   }
 
   void _openSettings() {
@@ -313,6 +381,25 @@ class _NarratePageState extends State<NarratePage> {
         child: Column(
           children: [
             _buildTopBar(colorScheme),
+            if (reading)
+              AnimatedBuilder(
+                animation: _scrollController,
+                builder: (context, _) {
+                  var value = 0.0;
+                  if (_scrollController.hasClients &&
+                      _scrollController.position.maxScrollExtent > 0) {
+                    value = (_scrollController.position.pixels /
+                            _scrollController.position.maxScrollExtent)
+                        .clamp(0.0, 1.0);
+                  }
+                  return LinearProgressIndicator(
+                    value: value,
+                    minHeight: 2,
+                    backgroundColor: Colors.transparent,
+                    color: colorScheme.primary.withValues(alpha: 0.4),
+                  );
+                },
+              ),
             if (_error != null) _buildErrorBanner(),
             Expanded(
               child: reading
@@ -346,6 +433,16 @@ class _NarratePageState extends State<NarratePage> {
             ),
           ),
           const Spacer(),
+          if (_narrative.isNotEmpty)
+            IconButton(
+              icon: Icon(
+                _speaking ? Icons.stop_circle_outlined : Icons.volume_up,
+                size: 20,
+              ),
+              tooltip: _speaking ? 'Stop' : 'Listen',
+              onPressed: _toggleSpeech,
+              color: Colors.white70,
+            ),
           if (_shareUrl.isNotEmpty) ...[
             IconButton(
               icon: const Icon(Icons.copy, size: 20),
@@ -481,7 +578,64 @@ class _NarratePageState extends State<NarratePage> {
                   ],
                 ),
                 const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    ActionChip(
+                      avatar: const Icon(Icons.casino, size: 16),
+                      label: const Text('Surprise me'),
+                      onPressed: _surprise,
+                      backgroundColor: const Color(0xFF1E293B),
+                      side: BorderSide.none,
+                    ),
+                    if (_featuredTitle != null)
+                      ActionChip(
+                        avatar: const Icon(Icons.star_outline, size: 16),
+                        label: Text('Featured: $_featuredTitle'),
+                        onPressed: () {
+                          _queryController.text = _featuredTitle!;
+                          _generate();
+                        },
+                        backgroundColor: const Color(0xFF1E293B),
+                        side: BorderSide.none,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
                 _buildExamples(),
+                if (_recent.isNotEmpty) ...[
+                  const SizedBox(height: 28),
+                  Text(
+                    'RECENTLY TOLD',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.4),
+                      fontSize: 11,
+                      letterSpacing: 1.6,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      for (final s in _recent)
+                        ActionChip(
+                          label: Text(
+                            s['style'] != null && s['style'] != 'standard'
+                                ? '${s['title']} · ${s['style']}'
+                                : '${s['title']}',
+                          ),
+                          onPressed: () => _openStory('${s['slug']}'),
+                          backgroundColor: const Color(0xFF1E293B),
+                          side: BorderSide.none,
+                        ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -541,6 +695,16 @@ class _NarratePageState extends State<NarratePage> {
                       Expanded(
                         child: SelectableText(
                           _shareUrl,
+                          style: const TextStyle(
+                            color: Colors.white38,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Text(
+                          '${_readingMinutes()} min read',
                           style: const TextStyle(
                             color: Colors.white38,
                             fontSize: 12,

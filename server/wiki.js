@@ -169,4 +169,48 @@ async function lookupTitle(title) {
   };
 }
 
-module.exports = { fetchPage, lookupTitle, relatedTitles, extractTitle };
+async function randomTitle() {
+  const res = await axios.get(WIKIPEDIA_CONTENT_API, {
+    params: {
+      action: 'query',
+      list: 'random',
+      rnnamespace: 0,
+      rnlimit: 1,
+      format: 'json',
+    },
+    timeout: 15000,
+    headers: { 'User-Agent': USER_AGENT },
+  });
+  const title = res.data?.query?.random?.[0]?.title;
+  if (!title) throw new Error('Could not pick a random article.');
+  return title;
+}
+
+async function featuredTitle() {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(now.getUTCDate()).padStart(2, '0');
+  const res = await axios.get(
+    `https://en.wikipedia.org/api/rest_v1/feed/featured/${y}/${m}/${d}`,
+    {
+      timeout: 15000,
+      headers: { 'User-Agent': USER_AGENT },
+      validateStatus: () => true,
+    },
+  );
+  const title = res.data?.tfa?.title;
+  if (res.status !== 200 || !title) {
+    throw new Error('No featured article today.');
+  }
+  return title;
+}
+
+module.exports = {
+  fetchPage,
+  lookupTitle,
+  relatedTitles,
+  extractTitle,
+  randomTitle,
+  featuredTitle,
+};
