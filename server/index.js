@@ -110,6 +110,12 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
     }
     res.end();
     try {
+      let prior = {};
+      try {
+        prior = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch {
+        // no existing story — fresh write
+      }
       fs.writeFileSync(
         file,
         JSON.stringify(
@@ -118,6 +124,7 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
             title: page.title,
             url: page.url,
             text,
+            related: prior.related,
             createdAt: new Date().toISOString(),
           },
           null,
