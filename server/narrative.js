@@ -14,10 +14,23 @@ Guidelines:
 - Output only the narrative story; do not include markdown headings unless they help the flow.
 `;
 
-function buildMessages(page) {
+const STYLE_GUIDES = {
+  standard: '',
+  bedtime:
+    'Narration style: a gentle, warm bedtime story. Soothing voice, soft pacing, cozy imagery. Wind down toward a calm, comforting ending — nothing jarring.',
+  kids: 'Narration style: for kids around 8-12. Simple, lively language — explain any big words in passing. Lead with wonder and excitement; short punchy paragraphs.',
+  dramatic:
+    'Narration style: cinematic and dramatic. Heighten tension and stakes, vivid scene-setting, a strong arc that builds to a climax. Bold, propulsive energy.',
+};
+
+const STYLE_IDS = Object.keys(STYLE_GUIDES);
+
+function buildMessages(page, style) {
+  const guide = STYLE_GUIDES[style] || '';
+  const system = guide ? `${SYSTEM_PROMPT}\n${guide}` : SYSTEM_PROMPT;
   const userContent = `Turn the following Wikipedia article into an interesting narrative.\n\nTitle: ${page.title}\nDescription: ${page.description}\nSummary: ${page.summary}\n\nFull text:\n${page.extract}\n`;
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: system },
     { role: 'user', content: userContent },
   ];
 }
@@ -57,11 +70,11 @@ function getModels() {
     .slice(0, 3);
 }
 
-async function* generateNarrative(page) {
+async function* generateNarrative(page, style = 'standard') {
   const provider = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
   const models = getModels();
   const model = models[0];
-  const messages = buildMessages(page);
+  const messages = buildMessages(page, style);
 
   if (provider === 'anthropic') {
     if (!process.env.LLM_API_KEY) {
@@ -71,7 +84,10 @@ async function* generateNarrative(page) {
     const stream = client.messages.stream({
       model,
       max_tokens: 4096,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      system: messages.find((m) => m.role === 'system')?.content,
+      messages: messages
+        .filter((m) => m.role !== 'system')
+        .map((m) => ({ role: m.role, content: m.content })),
     });
     for await (const event of stream) {
       if (event.type === 'content_block_delta' && event.delta?.text) {
@@ -152,4 +168,4 @@ Suggest 6 related Wikipedia article titles they might enjoy next. Prefer specifi
     .slice(0, 8);
 }
 
-module.exports = { generateNarrative, suggestRelated };
+module.exports = { generateNarrative, suggestRelated, STYLE_IDS };

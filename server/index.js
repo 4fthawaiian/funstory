@@ -6,7 +6,11 @@ const express = require('express');
 const cors = require('cors');
 const { rateLimit } = require('express-rate-limit');
 const { fetchPage, lookupTitle, relatedTitles, extractTitle } = require('./wiki');
-const { generateNarrative, suggestRelated } = require('./narrative');
+const { generateNarrative, suggestRelated, STYLE_IDS } = require('./narrative');
+
+// Story ids are "<slug>" for standard narrations and "<slug>@<style>" for
+// narrator-style variants — so the variant suffix rides through share URLs.
+const STORY_ID_RE = /^[a-z0-9][a-z0-9-]{0,79}(@[a-z0-9]{1,20})?$/;
 
 const app = express();
 const PORT = process.env.PORT || 8765;
@@ -73,6 +77,8 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
     return res.status(400).json({ detail: 'query is required' });
   }
   const regen = req.body.regen === true;
+  const style = STYLE_IDS.includes(req.body.style) ? req.body.style : 'standard';
+  const suffix = style === 'standard' ? '' : `@${style}`;
 
   function setStoryHeaders(slug) {
     res.setHeader('X-Story-Id', slug);
@@ -90,7 +96,7 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
 
   // Fast path: a story filed under the query's own slug needs zero
   // Wikipedia calls — pure disk read.
-  const querySlug = slugify(extractTitle(query));
+  const querySlug = slugify(extractTitle(query)) + suffix;
   if (!regen && fs.existsSync(storyFile(querySlug))) {
     try {
       return serveCached(storyFile(querySlug), querySlug);
@@ -107,7 +113,7 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
     return res.status(status).json({ detail: err.message });
   }
 
-  const slug = slugify(page.title);
+  const slug = slugify(page.title) + suffix;
   const file = storyFile(slug);
 
   // Second chance: the canonical title may differ from the query slug
@@ -124,7 +130,7 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
 
   let text = '';
   try {
-    for await (const chunk of generateNarrative(page)) {
+    for await (const chunk of generateNarrative(page, style)) {
       text += chunk;
       res.write(chunk);
       // Flush to ensure streaming reaches the client immediately
@@ -138,12 +144,23 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
       } catch {
         // no existing story — fresh write
       }
+      // Style variants share the canonical story's related topics when present
+      if (!prior.related && suffix) {
+        try {
+          prior.related = JSON.parse(
+            fs.readFileSync(storyFile(slugify(page.title)), 'utf8'),
+          ).related;
+        } catch {
+          // no canonical story yet — related generates lazily
+        }
+      }
       fs.writeFileSync(
         file,
         JSON.stringify(
           {
             slug,
             title: page.title,
+            style,
             url: page.url,
             text,
             related: prior.related,
@@ -173,7 +190,7 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
 
 app.get('/api/story/:slug', (req, res) => {
   const { slug } = req.params;
-  if (!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)) {
+  if (!STORY_ID_RE.test(slug)) {
     return res.status(400).json({ detail: 'invalid story id' });
   }
   const file = storyFile(slug);
@@ -189,7 +206,7 @@ app.get('/api/story/:slug', (req, res) => {
 
 app.get('/api/story/:slug/related', llmLimiter, async (req, res) => {
   const { slug } = req.params;
-  if (!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)) {
+  if (!STORY_ID_RE.test(slug)) {
     return res.status(400).json({ detail: 'invalid story id' });
   }
   const file = storyFile(slug);

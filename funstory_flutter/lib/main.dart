@@ -10,6 +10,13 @@ import 'platform_url.dart';
 
 const String defaultBackendUrl = 'https://funstory.4ft.me';
 
+const List<(String, String)> narratorStyles = [
+  ('standard', 'Normal'),
+  ('bedtime', 'Bedtime'),
+  ('kids', 'Kids'),
+  ('dramatic', 'Dramatic'),
+];
+
 /// Origin to build share URLs from — the web app's own origin when running
 /// in a browser, otherwise the configured backend.
 String shareOrigin(String backendUrl) {
@@ -66,6 +73,7 @@ class _NarratePageState extends State<NarratePage> {
   List<dynamic> _related = [];
   bool _relatedLoading = false;
   String _bypassKey = '';
+  String _style = 'standard';
 
   @override
   void initState() {
@@ -121,6 +129,9 @@ class _NarratePageState extends State<NarratePage> {
           _queryController.text = _storyTitle!;
           _shareUrl = '${shareOrigin(baseUrl)}/s/$slug';
           _related = (data['related'] as List?) ?? [];
+          if (slug.contains('@')) {
+            _style = slug.split('@').last;
+          }
         });
         if (_related.isEmpty) {
           _fetchRelated(slug);
@@ -158,7 +169,11 @@ class _NarratePageState extends State<NarratePage> {
       final request = http.Request('POST', uri)
         ..headers['Content-Type'] = 'application/json'
         ..headers['X-Funstory-Key'] = _bypassKey
-        ..body = jsonEncode({'query': query, 'regen': regen});
+        ..body = jsonEncode({
+          'query': query,
+          'regen': regen,
+          'style': _style,
+        });
 
       final response = await http.Client().send(request);
 
@@ -450,6 +465,22 @@ class _NarratePageState extends State<NarratePage> {
                   ],
                 ),
                 const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    for (final (id, label) in narratorStyles)
+                      ChoiceChip(
+                        label: Text(label),
+                        selected: _style == id,
+                        onSelected: (_) => setState(() => _style = id),
+                        backgroundColor: const Color(0xFF1E293B),
+                        selectedColor: const Color(0xFF164E63),
+                        side: BorderSide.none,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
                 _buildExamples(),
               ],
             ),
@@ -516,6 +547,18 @@ class _NarratePageState extends State<NarratePage> {
                           ),
                         ),
                       ),
+                      if (_style != 'standard')
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Text(
+                            _style,
+                            style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 12,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
                       if (_cached)
                         const Text(
                           'cached',
