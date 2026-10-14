@@ -1,0 +1,30 @@
+# Secrets — never commit
+.env
+*.env
+!.env.example
+
+# Generated story data
+server/stories/
+
+# Dependencies
+node_modules/
+
+# Flutter/Dart build artifacts (also covered by funstory_flutter/.gitignore)
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+
+# Ephemeral platform files
+**/Flutter/ephemeral/
+
+# Tool/IDE state
+.aider-desk/
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
