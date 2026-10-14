@@ -76,6 +76,78 @@ async function fetchPage(query) {
   };
 }
 
+// Deterministic related-topic discovery: editor-curated "See also" links
+// first, then CirrusSearch "morelike" (same engine that powered RelatedPages)
+async function relatedTitles(title) {
+  const headers = { 'User-Agent': USER_AGENT };
+  const [searchRes, sectionsRes] = await Promise.all([
+    axios.get(WIKIPEDIA_CONTENT_API, {
+      params: {
+        action: 'query',
+        list: 'search',
+        srsearch: `morelike:${title}`,
+        srlimit: 10,
+        srprop: '',
+        format: 'json',
+      },
+      timeout: 15000,
+      headers,
+      validateStatus: () => true,
+    }),
+    axios.get(WIKIPEDIA_CONTENT_API, {
+      params: { action: 'parse', page: title, prop: 'sections', format: 'json' },
+      timeout: 15000,
+      headers,
+      validateStatus: () => true,
+    }),
+  ]);
+
+  const morelike = (searchRes.data?.query?.search || []).map((s) => s.title);
+
+  let seeAlso = [];
+  const sections = sectionsRes.data?.parse?.sections || [];
+  const saSection = sections.find((s) =>
+    s.line.toLowerCase().includes('see also'),
+  );
+  if (saSection) {
+    const linksRes = await axios.get(WIKIPEDIA_CONTENT_API, {
+      params: {
+        action: 'parse',
+        page: title,
+        prop: 'links',
+        section: saSection.index,
+        format: 'json',
+      },
+      timeout: 15000,
+      headers,
+      validateStatus: () => true,
+    });
+    seeAlso = (linksRes.data?.parse?.links || [])
+      .filter((l) => l.ns === 0 && l['*'])
+      .map((l) => l['*']);
+  }
+
+  // Meta/navigational pages make poor narratives
+  const meta = /^(list|index|outline|timeline|glossary|bibliography|comparison) of /i;
+  const usable = (t) => !meta.test(t);
+
+  // Interleave the relevance-ranked morelike hits with curated See also links
+  const seen = new Set([title.toLowerCase()]);
+  const merged = [];
+  const longer = Math.max(morelike.length, seeAlso.length);
+  for (let i = 0; i < longer; i++) {
+    for (const t of [morelike[i], seeAlso[i]]) {
+      if (!t || !usable(t)) continue;
+      const key = t.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(t);
+      }
+    }
+  }
+  return merged.slice(0, 10);
+}
+
 async function lookupTitle(title) {
   const res = await axios.get(
     `${WIKIPEDIA_API}/${encodeURIComponent(title.replace(/ /g, '_'))}`,
@@ -96,4 +168,4 @@ async function lookupTitle(title) {
   };
 }
 
-module.exports = { fetchPage, lookupTitle };
+module.exports = { fetchPage, lookupTitle, relatedTitles };

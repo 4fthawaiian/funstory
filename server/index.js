@@ -5,7 +5,7 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const { rateLimit } = require('express-rate-limit');
-const { fetchPage, lookupTitle } = require('./wiki');
+const { fetchPage, lookupTitle, relatedTitles } = require('./wiki');
 const { generateNarrative, suggestRelated } = require('./narrative');
 
 const app = express();
@@ -184,10 +184,24 @@ app.get('/api/story/:slug/related', llmLimiter, async (req, res) => {
     return res.json({ related: story.related });
   }
   try {
-    const candidates = await suggestRelated(story.title, story.text || '');
+    // Wikipedia-derived suggestions are free; only fall back to the LLM
+    // when they come up short.
+    let candidates = await relatedTitles(story.title).catch(() => []);
+    if (candidates.length < 3) {
+      const llm = await suggestRelated(story.title, story.text || '').catch(
+        () => [],
+      );
+      candidates = [...candidates, ...llm];
+    }
+    const seen = new Set();
     const validated = (await Promise.all(candidates.map(lookupTitle)))
       .filter(Boolean)
-      .filter((r) => slugify(r.title) !== slug)
+      .filter((r) => {
+        const key = r.title.toLowerCase();
+        if (seen.has(key) || slugify(r.title) === slug) return false;
+        seen.add(key);
+        return true;
+      })
       .slice(0, 5);
     story.related = validated;
     try {
