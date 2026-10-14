@@ -129,12 +129,16 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
     }
   } catch (err) {
     console.error('LLM error:', err);
+    const quotaExceeded = err.status === 429 || /\b429\b/.test(err.message);
+    const friendly = quotaExceeded
+      ? 'The free story quota for today is exhausted — try again tomorrow.'
+      : `LLM error: ${err.message}`;
     // If headers already sent, close the stream; otherwise return JSON error
     if (res.headersSent) {
-      res.write(`\n\n[Error: ${err.message}]`);
+      res.write(`\n\n[Error: ${friendly}]`);
       return res.end();
     }
-    return res.status(502).json({ detail: `LLM error: ${err.message}` });
+    return res.status(quotaExceeded ? 429 : 502).json({ detail: friendly });
   }
 });
 
