@@ -14,3 +14,5 @@
 - [x] Start Node backend and verify end-to-end (systemd user service `funstory.service`)
 - [x] Persist generated stories + cache by Wikipedia slug (server/stories/*.json)
 - [x] Shareable URLs at /s/<slug> with copy + regenerate buttons in the UI
+- [x] Reader-focused UI redesign (serif typography, share links, further reading)
+- [x] Per-IP rate limiting on LLM endpoints (20/hr public; LAN/VPN/bypass-key exempt)

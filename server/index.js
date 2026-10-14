@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const { rateLimit } = require('express-rate-limit');
 const { fetchPage, lookupTitle } = require('./wiki');
 const { generateNarrative, suggestRelated } = require('./narrative');
 
@@ -14,8 +15,37 @@ const HOST = process.env.HOST || '0.0.0.0';
 const STORIES_DIR = path.join(__dirname, 'stories');
 fs.mkdirSync(STORIES_DIR, { recursive: true });
 
+// Only the VPS tunnel peer may carry a trusted X-Forwarded-For; a spoofed
+// XFF from a public visitor can never skip ahead of their real IP.
+app.set('trust proxy', '10.8.0.1');
+
 app.use(cors({ exposedHeaders: ['X-Story-Id', 'X-Story-Cached'] }));
 app.use(express.json());
+
+// Requests that never went through the public nginx (localhost/LAN/VPN
+// direct hits) or carry the bypass key are exempt — so local testing is
+// never throttled.
+const PRIVATE_IP = /^(?:127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|::1|f[cd]|fe80)/i;
+function isLocalRequest(req) {
+  const ip = (req.ip || '').replace(/^::ffff:/, '');
+  return PRIVATE_IP.test(ip);
+}
+function hasBypassKey(req) {
+  const key = process.env.RATE_LIMIT_BYPASS_KEY;
+  return !!key && req.get('x-funstory-key') === key;
+}
+
+const llmLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: parseInt(process.env.RATE_LIMIT_PER_HOUR || '20', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => isLocalRequest(req) || hasBypassKey(req),
+  handler: (_req, res) =>
+    res.status(429).json({
+      detail: 'Too many story requests from your address — try again later.',
+    }),
+});
 
 function slugify(title) {
   const slug = title
@@ -37,7 +67,7 @@ function validateConfig() {
   }
 }
 
-app.post('/api/narrate', async (req, res) => {
+app.post('/api/narrate', llmLimiter, async (req, res) => {
   const query = (req.body.query || '').trim();
   if (!query) {
     return res.status(400).json({ detail: 'query is required' });
@@ -124,7 +154,7 @@ app.get('/api/story/:slug', (req, res) => {
   }
 });
 
-app.get('/api/story/:slug/related', async (req, res) => {
+app.get('/api/story/:slug/related', llmLimiter, async (req, res) => {
   const { slug } = req.params;
   if (!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)) {
     return res.status(400).json({ detail: 'invalid story id' });
