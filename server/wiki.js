@@ -2,7 +2,8 @@ const axios = require('axios');
 
 const WIKIPEDIA_API = 'https://en.wikipedia.org/api/rest_v1/page/summary';
 const WIKIPEDIA_CONTENT_API = 'https://en.wikipedia.org/w/api.php';
-const USER_AGENT = 'FunStory/1.0 (narrative-app@example.com)';
+const USER_AGENT =
+  'FunStory/1.0 (https://github.com/4fthawaiian/funstory)';
 
 function extractTitle(query) {
   query = query.trim();
@@ -168,4 +169,4 @@ async function lookupTitle(title) {
   };
 }
 
-module.exports = { fetchPage, lookupTitle, relatedTitles };
+module.exports = { fetchPage, lookupTitle, relatedTitles, extractTitle };

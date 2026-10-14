@@ -5,7 +5,7 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const { rateLimit } = require('express-rate-limit');
-const { fetchPage, lookupTitle, relatedTitles } = require('./wiki');
+const { fetchPage, lookupTitle, relatedTitles, extractTitle } = require('./wiki');
 const { generateNarrative, suggestRelated } = require('./narrative');
 
 const app = express();
@@ -72,6 +72,32 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
   if (!query) {
     return res.status(400).json({ detail: 'query is required' });
   }
+  const regen = req.body.regen === true;
+
+  function setStoryHeaders(slug) {
+    res.setHeader('X-Story-Id', slug);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+  }
+
+  function serveCached(file, slug) {
+    const story = JSON.parse(fs.readFileSync(file, 'utf8'));
+    setStoryHeaders(slug);
+    res.setHeader('X-Story-Cached', '1');
+    res.end(story.text);
+  }
+
+  // Fast path: a story filed under the query's own slug needs zero
+  // Wikipedia calls — pure disk read.
+  const querySlug = slugify(extractTitle(query));
+  if (!regen && fs.existsSync(storyFile(querySlug))) {
+    try {
+      return serveCached(storyFile(querySlug), querySlug);
+    } catch {
+      // Corrupt file — fall through and regenerate
+    }
+  }
 
   let page;
   try {
@@ -83,22 +109,18 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
 
   const slug = slugify(page.title);
   const file = storyFile(slug);
-  const regen = req.body.regen === true;
 
-  res.setHeader('X-Story-Id', slug);
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('X-Accel-Buffering', 'no');
-
+  // Second chance: the canonical title may differ from the query slug
+  // (aliases, URLs) but the story already exists under it.
   if (!regen && fs.existsSync(file)) {
     try {
-      const story = JSON.parse(fs.readFileSync(file, 'utf8'));
-      res.setHeader('X-Story-Cached', '1');
-      return res.end(story.text);
+      return serveCached(file, slug);
     } catch {
       // Corrupt story file — fall through and regenerate
     }
   }
+
+  setStoryHeaders(slug);
 
   let text = '';
   try {
@@ -193,16 +215,23 @@ app.get('/api/story/:slug/related', llmLimiter, async (req, res) => {
       );
       candidates = [...candidates, ...llm];
     }
+    // Validate in batches of 6 and stop once we have 5 — most candidates
+    // resolve, so this rarely needs a second batch.
     const seen = new Set();
-    const validated = (await Promise.all(candidates.map(lookupTitle)))
-      .filter(Boolean)
-      .filter((r) => {
+    const validated = [];
+    for (let i = 0; i < candidates.length && validated.length < 5; i += 6) {
+      const batch = await Promise.all(
+        candidates.slice(i, i + 6).map((c) => lookupTitle(c).catch(() => null)),
+      );
+      for (const r of batch) {
+        if (!r) continue;
         const key = r.title.toLowerCase();
-        if (seen.has(key) || slugify(r.title) === slug) return false;
+        if (seen.has(key) || slugify(r.title) === slug) continue;
         seen.add(key);
-        return true;
-      })
-      .slice(0, 5);
+        validated.push(r);
+        if (validated.length >= 5) break;
+      }
+    }
     story.related = validated;
     try {
       fs.writeFileSync(file, JSON.stringify(story, null, 2));
