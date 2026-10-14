@@ -25,9 +25,22 @@ const STYLE_GUIDES = {
 
 const STYLE_IDS = Object.keys(STYLE_GUIDES);
 
-function buildMessages(page, style) {
-  const guide = STYLE_GUIDES[style] || '';
-  const system = guide ? `${SYSTEM_PROMPT}\n${guide}` : SYSTEM_PROMPT;
+const LENGTH_GUIDES = {
+  short:
+    'Length: a short, punchy telling — aim for about 400 words. Hit the highlights and land the ending crisply.',
+  medium: '',
+  long: 'Length: an expansive, deep telling — aim for 2500 words or more. Richer context, more detail, a fuller arc.',
+};
+
+const LENGTH_IDS = Object.keys(LENGTH_GUIDES);
+
+const LENGTH_MAX_TOKENS = { short: 800, medium: 4096, long: 8192 };
+
+function buildMessages(page, style, length) {
+  const parts = [STYLE_GUIDES[style], LENGTH_GUIDES[length]].filter(Boolean);
+  const system = parts.length
+    ? `${SYSTEM_PROMPT}\n${parts.join('\n')}`
+    : SYSTEM_PROMPT;
   const userContent = `Turn the following Wikipedia article into an interesting narrative.\n\nTitle: ${page.title}\nDescription: ${page.description}\nSummary: ${page.summary}\n\nFull text:\n${page.extract}\n`;
   return [
     { role: 'system', content: system },
@@ -70,11 +83,12 @@ function getModels() {
     .slice(0, 3);
 }
 
-async function* generateNarrative(page, style = 'standard') {
+async function* generateNarrative(page, style = 'standard', length = 'medium') {
   const provider = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
   const models = getModels();
   const model = models[0];
-  const messages = buildMessages(page, style);
+  const messages = buildMessages(page, style, length);
+  const maxTokens = LENGTH_MAX_TOKENS[length] || LENGTH_MAX_TOKENS.medium;
 
   if (provider === 'anthropic') {
     if (!process.env.LLM_API_KEY) {
@@ -83,7 +97,7 @@ async function* generateNarrative(page, style = 'standard') {
     const client = new Anthropic({ apiKey: process.env.LLM_API_KEY });
     const stream = client.messages.stream({
       model,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
       system: messages.find((m) => m.role === 'system')?.content,
       messages: messages
         .filter((m) => m.role !== 'system')
@@ -104,6 +118,7 @@ async function* generateNarrative(page, style = 'standard') {
     messages,
     stream: true,
     temperature: 0.7,
+    max_tokens: maxTokens,
   };
   if (isOpenRouter(client.baseURL) && models.length > 1) {
     params.models = models;
@@ -168,4 +183,9 @@ Suggest 6 related Wikipedia article titles they might enjoy next. Prefer specifi
     .slice(0, 8);
 }
 
-module.exports = { generateNarrative, suggestRelated, STYLE_IDS };
+module.exports = {
+  generateNarrative,
+  suggestRelated,
+  STYLE_IDS,
+  LENGTH_IDS,
+};

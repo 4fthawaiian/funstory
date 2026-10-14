@@ -13,11 +13,17 @@ const {
   randomTitle,
   featuredTitle,
 } = require('./wiki');
-const { generateNarrative, suggestRelated, STYLE_IDS } = require('./narrative');
+const {
+  generateNarrative,
+  suggestRelated,
+  STYLE_IDS,
+  LENGTH_IDS,
+} = require('./narrative');
 
-// Story ids are "<slug>" for standard narrations and "<slug>@<style>" for
-// narrator-style variants — so the variant suffix rides through share URLs.
-const STORY_ID_RE = /^[a-z0-9][a-z0-9-]{0,79}(@[a-z0-9]{1,20})?$/;
+// Story ids are "<slug>" for the default telling and "<slug>@<variant>" for
+// variants, where variant is "<style>" or "<style>-<length>" — e.g.
+// "marie-curie@bedtime" or "marie-curie@bedtime-short".
+const STORY_ID_RE = /^[a-z0-9][a-z0-9-]{0,79}(@[a-z0-9-]{1,30})?$/;
 
 const app = express();
 const PORT = process.env.PORT || 8765;
@@ -85,7 +91,14 @@ function validateConfig() {
 app.post('/api/narrate', llmLimiter, async (req, res) => {
   let query = (req.body.query || '').trim();
   const style = STYLE_IDS.includes(req.body.style) ? req.body.style : 'standard';
-  const suffix = style === 'standard' ? '' : `@${style}`;
+  const length = LENGTH_IDS.includes(req.body.length)
+    ? req.body.length
+    : 'medium';
+  const variant =
+    style === 'standard' && length === 'medium'
+      ? ''
+      : `${style}${length === 'medium' ? '' : `-${length}`}`;
+  const suffix = variant ? `@${variant}` : '';
   const regen = req.body.regen === true;
 
   if (!query && req.body.random === true) {
@@ -151,7 +164,7 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
 
   let text = '';
   try {
-    for await (const chunk of generateNarrative(page, style)) {
+    for await (const chunk of generateNarrative(page, style, length)) {
       text += chunk;
       res.write(chunk);
       // Flush to ensure streaming reaches the client immediately
@@ -182,6 +195,7 @@ app.post('/api/narrate', llmLimiter, async (req, res) => {
             slug,
             title: page.title,
             style,
+            length,
             url: page.url,
             text,
             related: prior.related,
@@ -343,7 +357,7 @@ const escapeAttr = (s) =>
   String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
 function ogTags(story, slug, req) {
-  const variant = slug.includes('@') ? ` — ${slug.split('@')[1]} style` : '';
+  const variant = slug.includes('@') ? ` — ${slug.split('@')[1]}` : '';
   const desc = (story.text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
   const url = `https://${req.get('host')}/s/${slug}`;
   return `

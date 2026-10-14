@@ -22,3 +22,4 @@
 - [x] "Surprise me" random story + "Featured" daily story (warm-cached on boot)
 - [x] Listen button (browser TTS), reading time, scroll progress bar
 - [x] "Recently told" section on landing
+- [x] Story length control (Short/Medium/Long) — variant ids `slug@style-length`

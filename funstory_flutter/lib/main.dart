@@ -17,6 +17,12 @@ const List<(String, String)> narratorStyles = [
   ('dramatic', 'Dramatic'),
 ];
 
+const List<(String, String)> storyLengths = [
+  ('short', 'Short'),
+  ('medium', 'Medium'),
+  ('long', 'Long'),
+];
+
 /// Origin to build share URLs from — the web app's own origin when running
 /// in a browser, otherwise the configured backend.
 String shareOrigin(String backendUrl) {
@@ -74,6 +80,7 @@ class _NarratePageState extends State<NarratePage> {
   bool _relatedLoading = false;
   String _bypassKey = '';
   String _style = 'standard';
+  String _length = 'medium';
   bool _speaking = false;
   String? _featuredTitle;
   List<dynamic> _recent = [];
@@ -163,7 +170,15 @@ class _NarratePageState extends State<NarratePage> {
           _shareUrl = '${shareOrigin(baseUrl)}/s/$slug';
           _related = (data['related'] as List?) ?? [];
           if (slug.contains('@')) {
-            _style = slug.split('@').last;
+            final v = slug.split('@').last.split('-');
+            if (narratorStyles.any((s) => s.$1 == v[0])) {
+              _style = v[0];
+            }
+            if (v.length > 1 && storyLengths.any((l) => l.$1 == v[1])) {
+              _length = v[1];
+            } else if (storyLengths.any((l) => l.$1 == v[0])) {
+              _length = v[0];
+            }
           }
         });
         if (_related.isEmpty) {
@@ -213,6 +228,7 @@ class _NarratePageState extends State<NarratePage> {
           'query': query,
           'regen': regen,
           'style': _style,
+          'length': _length,
           'random': random,
         });
 
@@ -564,13 +580,29 @@ class _NarratePageState extends State<NarratePage> {
                 const SizedBox(height: 16),
                 Wrap(
                   spacing: 8,
+                  runSpacing: 4,
                   alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     for (final (id, label) in narratorStyles)
                       ChoiceChip(
                         label: Text(label),
                         selected: _style == id,
                         onSelected: (_) => setState(() => _style = id),
+                        backgroundColor: const Color(0xFF1E293B),
+                        selectedColor: const Color(0xFF164E63),
+                        side: BorderSide.none,
+                      ),
+                    Container(
+                      width: 1,
+                      height: 20,
+                      color: Colors.white12,
+                    ),
+                    for (final (id, label) in storyLengths)
+                      ChoiceChip(
+                        label: Text(label),
+                        selected: _length == id,
+                        onSelected: (_) => setState(() => _length = id),
                         backgroundColor: const Color(0xFF1E293B),
                         selectedColor: const Color(0xFF164E63),
                         side: BorderSide.none,
@@ -711,11 +743,14 @@ class _NarratePageState extends State<NarratePage> {
                           ),
                         ),
                       ),
-                      if (_style != 'standard')
+                      if (_style != 'standard' || _length != 'medium')
                         Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: Text(
-                            _style,
+                            [
+                              if (_style != 'standard') _style,
+                              if (_length != 'medium') _length,
+                            ].join(' · '),
                             style: const TextStyle(
                               color: Colors.white38,
                               fontSize: 12,
