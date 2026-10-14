@@ -65,6 +65,7 @@ class _NarratePageState extends State<NarratePage> {
   bool _cached = false;
   List<dynamic> _related = [];
   bool _relatedLoading = false;
+  String _bypassKey = '';
 
   @override
   void initState() {
@@ -73,6 +74,7 @@ class _NarratePageState extends State<NarratePage> {
     if (backend != null && backend.isNotEmpty) {
       _backendController.text = backend;
     }
+    _bypassKey = Uri.base.queryParameters['key'] ?? '';
     final segs = Uri.base.pathSegments;
     if (segs.length >= 2 && segs[0] == 's' && segs[1].isNotEmpty) {
       _loadSharedStory(segs[1]);
@@ -155,6 +157,7 @@ class _NarratePageState extends State<NarratePage> {
     try {
       final request = http.Request('POST', uri)
         ..headers['Content-Type'] = 'application/json'
+        ..headers['X-Funstory-Key'] = _bypassKey
         ..body = jsonEncode({'query': query, 'regen': regen});
 
       final response = await http.Client().send(request);
@@ -209,7 +212,10 @@ class _NarratePageState extends State<NarratePage> {
     setState(() => _relatedLoading = true);
     try {
       final res = await http
-          .get(Uri.parse('$baseUrl/api/story/$slug/related'))
+          .get(
+            Uri.parse('$baseUrl/api/story/$slug/related'),
+            headers: {'X-Funstory-Key': _bypassKey},
+          )
           .timeout(const Duration(seconds: 90));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
